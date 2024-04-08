@@ -1,35 +1,93 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" remoteFilesAllowedToDisappearOnAutoupload="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="liuyq@10.254.9.180:22 password (10)" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
+    <option name="confirmBeforeUploading" value="false" />
     <serverData>
-      <paths name="hlz@172.17.60.30:22 agent">
+      <paths name="liuyq@10.134.152.65:22 password">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
-      <paths name="zhangrx@10.134.153.63:22 password">
+      <paths name="liuyq@10.254.9.180:22 password">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
-      <paths name="zhangrx@10.254.9.180:22 agent (4)">
+      <paths name="liuyq@10.254.9.180:22 password (10)">
         <serverdata>
           <mappings>
-            <mapping local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/home/liuyq/OpenUR" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>
-      <paths name="zhangrx@211.71.15.41:22 password">
+      <paths name="liuyq@10.254.9.180:22 password (11)">
         <serverdata>
           <mappings>
-            <mapping local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/home/liuyq/OpenUR" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="liuyq@10.254.9.180:22 password (2)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/tmp/pycharm_project_365" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="liuyq@10.254.9.180:22 password (3)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/liuyq/OpenUR" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="liuyq@10.254.9.180:22 password (4)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/liuyq/OpenUR" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="liuyq@10.254.9.180:22 password (5)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/liuyq/OpenUR" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="liuyq@10.254.9.180:22 password (6)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/liuyq/OpenUR" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="liuyq@10.254.9.180:22 password (7)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/liuyq/OpenUR" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="liuyq@10.254.9.180:22 password (8)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/tmp/pycharm_project_49" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="liuyq@10.254.9.180:22 password (9)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/liuyq/OpenUR" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>
     </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
   </component>
 </project>

@@ -11,6 +11,9 @@ import numpy as np
 import scipy.stats as stats
 import math
 
+from model.t5 import t5_encode_text, get_encoded_dim, DEFAULT_T5_NAME
+
+
 class Attention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
         super().__init__()
@@ -19,15 +22,31 @@ class Attention(nn.Module):
         # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
         self.scale = qk_scale or head_dim ** -0.5
 
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.q = nn.Linear(dim, dim, bias=qkv_bias)
+        self.k = nn.Linear(dim, dim, bias=qkv_bias)
+        self.v = nn.Linear(dim, dim, bias=qkv_bias)
+
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x):
+    def forward(self, x, context=None):
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
+
+        # if context is not None:
+        #     print(context.shape)
+
+        q = self.q(x).reshape(B, N, 1, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)[0]
+
+        # print(context.shape,x.shape)
+
+        if context is not None:
+            # print(context.shape)
+            k, v = self.k(context).reshape(B, -1, 1, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)[0], \
+                self.v(context).reshape(B, -1, 1, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)[0]
+        else:
+            k, v = self.k(x).reshape(B, N, 1, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)[0], \
+                self.v(x).reshape(B, N, 1, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)[0]
 
         with torch.cuda.amp.autocast(enabled=False):
             attn = (q.float() @ k.float().transpose(-2, -1)) * self.scale
@@ -48,22 +67,27 @@ class Block(nn.Module):
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
         super().__init__()
         self.norm1 = norm_layer(dim)
+
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+
+        self.cross_attn = Attention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
+        self.norm3 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-    def forward(self, x, return_attention=False):
-        if return_attention:
-            _, attn = self.attn(self.norm1(x))
-            return attn
-        else:
-            y, _ = self.attn(self.norm1(x))
-            x = x + self.drop_path(y)
-            x = x + self.drop_path(self.mlp(self.norm2(x)))
+    def forward(self, x, context=None):
+        y, _ = self.attn(self.norm1(x))
+        x = x + self.drop_path(y)
+        if context is not None:
+            y2, __ = self.cross_attn(self.norm2(x), context)
+            x = x + self.drop_path(y2)
+        x = x + self.drop_path(self.mlp(self.norm3(x)))
         return x
 
 
@@ -190,15 +214,17 @@ class MaskedGenerativeEncoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
 
-    def __init__(self, img_size=256, patch_size=16, in_chans=3,
+    def __init__(self, t5_name="files/LLM", img_size=256, patch_size=16, in_chans=3,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False,
                  mask_ratio_min=0.5, mask_ratio_max=1.0, mask_ratio_mu=0.55, mask_ratio_std=0.25,
-                 vqgan_ckpt_path='vqgan_jax_strongaug.ckpt'):
+                 text_condition=1, vqgan_ckpt_path='vqgan_jax_strongaug.ckpt'):
         super().__init__()
 
         # --------------------------------------------------------------------------
+
+        self.text_condition = text_condition
 
         self.codebook_size = 4900
         vocab_size = self.codebook_size + 1000 + 1  # 1024 codebook size, 1000 classes, 1 for mask token.
@@ -214,8 +240,6 @@ class MaskedGenerativeEncoderViT(nn.Module):
         self.mask_ratio_generator = stats.truncnorm((mask_ratio_min - mask_ratio_mu) / mask_ratio_std,
                                                     (mask_ratio_max - mask_ratio_mu) / mask_ratio_std,
                                                     loc=mask_ratio_mu, scale=mask_ratio_std)
-
-        # --------------------------------------------------------------------------
 
         # --------------------------------------------------------------------------
 
@@ -237,8 +261,6 @@ class MaskedGenerativeEncoderViT(nn.Module):
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
         # --------------------------------------------------------------------------
-
-        # --------------------------------------------------------------------------
         # ur decoder specifics
         self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
 
@@ -256,8 +278,6 @@ class MaskedGenerativeEncoderViT(nn.Module):
             for i in range(decoder_depth)])
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
-        # self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size ** 2 * in_chans, bias=True)  # decoder to patch
-        # --------------------------------------------------------------------------
 
         # --------------------------------------------------------------------------
         # MlmLayer
@@ -268,6 +288,14 @@ class MaskedGenerativeEncoderViT(nn.Module):
         self.criterion = LabelSmoothingCrossEntropy(smoothing=0.001)
 
         self.initialize_weights()
+
+        # --------------------------------------------------------------------------
+        # text encoders
+        self.encode_text = partial(t5_encode_text, name=t5_name)
+
+        text_embed_dim = get_encoded_dim(t5_name)
+
+        self.text_embed_proj = nn.Linear(text_embed_dim, embed_dim, bias=False)
 
     def get_mask_token_label(self):
         return self.mask_token_label
@@ -297,7 +325,7 @@ class MaskedGenerativeEncoderViT(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def forward_encoder(self, x):
+    def forward_encoder(self, x, text_embed=None):
         # tokenization
         token_indices = x
         gt_indices = token_indices.clone().detach().long()
@@ -346,13 +374,13 @@ class MaskedGenerativeEncoderViT(nn.Module):
         # apply Transformer blocks
         x = input_embeddings_after_drop
         for blk in self.blocks:
-            x = blk(x)
+            x = blk(x, text_embed)
         x = self.norm(x)
         # print("Encoder representation shape:", x.shape)
 
         return x, gt_indices, token_drop_mask, token_all_mask
 
-    def forward_decoder(self, x, token_drop_mask, token_all_mask):
+    def forward_decoder(self, x, token_drop_mask, token_all_mask, text_embed=None):
         # embed tokens
         x = self.decoder_embed(x)
 
@@ -374,7 +402,7 @@ class MaskedGenerativeEncoderViT(nn.Module):
 
         # apply Transformer blocks
         for blk in self.decoder_blocks:
-            x = blk(x)
+            x = blk(x, text_embed)
 
         x = self.decoder_norm(x)
 
@@ -394,14 +422,30 @@ class MaskedGenerativeEncoderViT(nn.Module):
         loss = (loss * mask[:, 1:]).sum() / mask[:, 1:].sum()  # mean loss on removed patches
         return loss, loss_smooth, loss_pre, loss_nll
 
-    def forward(self, imgs):
-        latent, gt_indices, token_drop_mask, token_all_mask = self.forward_encoder(imgs)
-        logits = self.forward_decoder(latent, token_drop_mask, token_all_mask)
+    def text_encoder(self, text):
+        text_embeds = self.encode_text(text).float()
+        context = self.text_embed_proj(text_embeds)
+        return context
+
+    def forward(self, imgs, text=None):
+
+        assert (text is not None) or (self.text_condition == 0), "Text condition is not supported in this model."
+
+        # print(text)
+
+        if text is not None:
+            text_embed = self.text_encoder(text)
+            # print(text_embed)
+        else:
+            text_embed = None
+
+        latent, gt_indices, token_drop_mask, token_all_mask = self.forward_encoder(imgs, text_embed)
+        logits = self.forward_decoder(latent, token_drop_mask, token_all_mask, text_embed)
 
         loss, loss_pre, loss_smooth, loss_nll = self.forward_loss(gt_indices, logits, token_all_mask)
         # torch.mean(nll_loss_pre), torch.mean(smooth_loss), torch.mean(nll_loss)
         return loss
-    
+
     def get_embed(self, imgs):
         # print(imgs.shape)
         token_indices = imgs
@@ -441,99 +485,88 @@ class MaskedGenerativeEncoderViT(nn.Module):
         # Masks tokens with lower confidence.
         masking = (confidence <= cut_off)
         return masking
-    
-    def toNumber(self, now):
-        x_len = (now[0] - 116.2) // 0.005
-        y_len = (now[1] - 39.75) // 0.005
-        return x_len * 70 + y_len
 
-    def gen_trajs(self, config, model, kd_tree=None, choice_temperature=8.5):
-        with torch.no_grad():
-            # model = model_.module
-            model.eval()
-            torch.manual_seed(config.seed)
-            np.random.seed(config.seed)
-            
-            beihang = [116.40371791342531, 40.0695842184672]
-            beihang = self.toNumber(beihang)
-            
-            shichahai = [116.45926002773483, 39.91148538146876]
-            shichahai = self.toNumber(shichahai)
-            
-            codebook_size = 4900
-            mask_token_id = self.mask_token_label
-            unknown_number_in_the_beginning = 96 
-            unknown_number_in_the_beginning = 96
-            _CONFIDENCE_OF_KNOWN_TOKENS = +np.inf
-            bsz = config.eval_batch_size
-            num_iter = 11 # 10 or 11
+    def gen_trajs(self, config, text=None, choice_temperature=8.5):
+        torch.manual_seed(config.seed)
+        np.random.seed(config.seed)
 
-            initial_token_indices = mask_token_id * torch.ones(bsz, unknown_number_in_the_beginning)
-            for i in range(4):
-                initial_token_indices[:, i] = beihang
-                initial_token_indices[:, 48 + 4 + i] = shichahai
+        codebook_size = 4900
+        mask_token_id = self.mask_token_label
+        unknown_number_in_the_beginning = 96
+        _CONFIDENCE_OF_KNOWN_TOKENS = +np.inf
+        bsz = config.eval_batch_size
+        num_iter = 11  # 10 or 11
 
-            token_indices = initial_token_indices.cuda()
+        initial_token_indices = mask_token_id * torch.ones(bsz, unknown_number_in_the_beginning)
 
-            for step in range(num_iter):
-                cur_ids = token_indices.clone().long()
+        token_indices = initial_token_indices.cuda()
 
-                token_indices = torch.cat(
-                    [torch.zeros(token_indices.size(0), 1).cuda(device=token_indices.device), token_indices], dim=1)
-                token_indices[:, 0] = self.fake_class_label
-                token_indices = token_indices.long()
-                token_all_mask = token_indices == mask_token_id
+        if text is not None:
+            text_embed = self.text_encoder(text)
+            # print(text_embed)
+        else:
+            text_embed = None
 
-                token_drop_mask = torch.zeros_like(token_indices)
+        for step in range(num_iter):
+            cur_ids = token_indices.clone().long()
 
-                # token embedding
-                input_embeddings = self.token_emb(token_indices)
+            token_indices = torch.cat(
+                [torch.zeros(token_indices.size(0), 1).cuda(device=token_indices.device), token_indices], dim=1)
+            token_indices[:, 0] = self.fake_class_label
+            token_indices = token_indices.long()
+            token_all_mask = token_indices == mask_token_id
 
-                # encoder
-                x = input_embeddings
-                for blk in self.blocks:
-                    x = blk(x)
-                x = self.norm(x)
+            token_drop_mask = torch.zeros_like(token_indices)
 
-                # decoder
-                logits = self.forward_decoder(x, token_drop_mask, token_all_mask)
-                logits = logits[:, 1:, :codebook_size]
+            # token embedding
+            input_embeddings = self.token_emb(token_indices)
 
-                # get token prediction
-                sample_dist = torch.distributions.categorical.Categorical(logits=logits)
-                sampled_ids = sample_dist.sample()
+            # encoder
+            x = input_embeddings
+            for blk in self.blocks:
+                x = blk(x, text_embed)
+            x = self.norm(x)
 
-                # get ids for next step
-                unknown_map = (cur_ids == mask_token_id)
-                sampled_ids = torch.where(unknown_map, sampled_ids, cur_ids)
-                # Defines the mask ratio for the next round. The number to mask out is
-                # determined by mask_ratio * unknown_number_in_the_beginning.
-                ratio = 1. * (step + 1) / num_iter
+            # decoder
+            logits = self.forward_decoder(x, token_drop_mask, token_all_mask, text_embed)
+            logits = logits[:, 1:, :codebook_size]
 
-                mask_ratio = np.cos(math.pi / 2. * ratio)
+            # get token prediction
+            sample_dist = torch.distributions.categorical.Categorical(logits=logits)
+            sampled_ids = sample_dist.sample()
 
-                # sample ids according to prediction confidence
-                probs = torch.nn.functional.softmax(logits, dim=-1)
-                selected_probs = torch.squeeze(
-                    torch.gather(probs, dim=-1, index=torch.unsqueeze(sampled_ids, -1)), -1)
+            # get ids for next step
+            unknown_map = (cur_ids == mask_token_id)
+            sampled_ids = torch.where(unknown_map, sampled_ids, cur_ids)
+            # Defines the mask ratio for the next round. The number to mask out is
+            # determined by mask_ratio * unknown_number_in_the_beginning.
+            ratio = 1. * (step + 1) / num_iter
 
-                selected_probs = torch.where(unknown_map, selected_probs.double(), _CONFIDENCE_OF_KNOWN_TOKENS).float()
+            mask_ratio = np.cos(math.pi / 2. * ratio)
 
-                mask_len = torch.Tensor([np.floor(unknown_number_in_the_beginning * mask_ratio)]).cuda()
-                # Keeps at least one of prediction in this round and also masks out at least
-                # one and for the next iteration
-                mask_len = torch.maximum(torch.Tensor([1]).cuda(),
-                                         torch.minimum(torch.sum(unknown_map, dim=-1, keepdims=True) - 1, mask_len))
+            # sample ids according to prediction confidence
+            probs = torch.nn.functional.softmax(logits, dim=-1)
+            selected_probs = torch.squeeze(
+                torch.gather(probs, dim=-1, index=torch.unsqueeze(sampled_ids, -1)), -1)
 
-                # Sample masking tokens for next iteration
-                masking = self.mask_by_random_topk(mask_len[0], selected_probs, choice_temperature * (1 - ratio))
-                if step == num_iter - 1:
-                    masking = torch.zeros_like(masking)
-                # Masks tokens with lower confidence.
-                token_indices = torch.where(masking, mask_token_id, sampled_ids)
+            selected_probs = torch.where(unknown_map, selected_probs.double(), _CONFIDENCE_OF_KNOWN_TOKENS).float()
 
-            # print(torch.max(token_indices), torch.min(token_indices))
-            return token_indices
+            mask_len = torch.Tensor([np.floor(unknown_number_in_the_beginning * mask_ratio)]).cuda()
+            # Keeps at least one of prediction in this round and also masks out at least
+            # one and for the next iteration
+            mask_len = torch.maximum(torch.Tensor([1]).cuda(),
+                                     torch.minimum(torch.sum(unknown_map, dim=-1, keepdims=True) - 1, mask_len))
+
+            # Sample masking tokens for next iteration
+            masking = self.mask_by_random_topk(mask_len[0], selected_probs, choice_temperature * (1 - ratio))
+            if step == num_iter - 1:
+                masking = torch.zeros_like(masking)
+            # Masks tokens with lower confidence.
+            token_indices = torch.where(masking, mask_token_id, sampled_ids)
+
+        # print(torch.max(token_indices), torch.min(token_indices))
+        return token_indices
+
 
 def ur_vit_base_patch16(**kwargs):
     model = MaskedGenerativeEncoderViT(
@@ -541,6 +574,7 @@ def ur_vit_base_patch16(**kwargs):
         decoder_embed_dim=128, decoder_depth=4, decoder_num_heads=4,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
+
 
 def ur_vit_middle_patch16(**kwargs):
     model = MaskedGenerativeEncoderViT(

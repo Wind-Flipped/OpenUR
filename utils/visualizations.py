@@ -88,10 +88,12 @@ def calc_traj(traj_):
     return value1, value2, value3, value4
 
 
-def to_gps(x):
-    x_0 = int(x) // 70
-    x_1 = int(x) % 70
-    return [x_0 * 0.005 + 116.2, x_1 * 0.005 + 39.75]
+def transfer_gps_to_int(gps):
+    return int((gps[0] - 116.2075) * 100) * 30 + int((gps[1] - 39.7523) * 100)
+
+
+def transfer_int_to_gps(x):
+    return [(x // 30) / 100 + 116.2075, (x % 30) / 100 + 39.7523]
 
 
 def decodeTrajs(trajs):
@@ -99,12 +101,12 @@ def decodeTrajs(trajs):
     for traj in trajs:
         temp = []
         for item in traj:
-            temp.append(to_gps(item))
+            temp.append(transfer_int_to_gps(item))
         now.append(temp)
     return np.array(now)
 
 
-def visual(now_trajs, epoch, name, batch_size, model_name="test0"):
+def visual(now_trajs, epoch, name, batch_size, model_name="test0", res_texts=None):
     plt.figure(figsize=(8, 8))
     # 40.02492858828391, 116.21972799736383
     # 39.780822893842036, 116.5699544739144
@@ -115,9 +117,9 @@ def visual(now_trajs, epoch, name, batch_size, model_name="test0"):
 
     for i in range(batch_size):
         traj = now_trajs[i]
-        if traj.shape[0]==2:
+        if traj.shape[0] == 2:
             traj = traj.T
-        assert traj.shape[1]==2
+        assert traj.shape[1] == 2
         plt.plot(traj[:, 0], traj[:, 1], color='blue', alpha=0.1)
     values = calc_trajs(now_trajs[:batch_size])
     plt.title(f"turn: %.2lf, deg %.2lf, dis %.2lf, stay %.2lf" % (values[0], values[1], values[2], values[3]))
@@ -129,18 +131,23 @@ def visual(now_trajs, epoch, name, batch_size, model_name="test0"):
     np.savetxt(f'./metrices/{model_name}/{epoch}-{name}.txt', metrices)
 
     fig, axs = plt.subplots(4, 4, figsize=(16, 16))
-    for i, iur in enumerate(now_trajs):
+    for i, image in enumerate(now_trajs):
         if i >= 16:
             break
         plt.subplot(4, 4, i + 1)
-        if iur.shape[0]==2:
-            iur = iur.T
-        assert iur.shape[1]==2
-        print("-----------------------------------------%d-------------------------------------"%i)
-        print(iur)
-        plt.plot(iur[:, 0], iur[:, 1], color='blue', alpha=0.1)
-        values = calc_traj(iur)
+        if image.shape[0] == 2:
+            image = image.T
+        assert image.shape[1] == 2
+        plt.plot(image[:, 0], image[:, 1], color='blue', alpha=0.1)
+        values = calc_traj(image)
         plt.title(f"turn: %d, degres %d, distance %d, stay %d" % (values[0], values[1], values[2], values[3]))
     plt.savefig(f'./visualizations/{model_name}/sample-{epoch}-{name}.png')
+
+    if res_texts is not None:
+        with open(f'./visualizations/{model_name}/sample-{epoch}-{name}.txt', 'w') as f:
+            for i, res_text in enumerate(res_texts):
+                f.write(f"{i}: {res_text}\n")
+                if i >= 16:
+                    break
 
     plt.close()
