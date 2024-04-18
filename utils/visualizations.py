@@ -120,7 +120,12 @@ def visual(now_trajs, epoch, name, batch_size, model_name="test0", res_texts=Non
         if traj.shape[0] == 2:
             traj = traj.T
         assert traj.shape[1] == 2
-        plt.plot(traj[:, 0], traj[:, 1], color='blue', alpha=0.1)
+        # 作图时，不能超过116.6度
+        has_point_over_116 = np.any(traj[:, 0] > 116.6)
+        if has_point_over_116:
+            pass
+        else:
+            plt.plot(traj[:, 0], traj[:, 1], color='blue', alpha=0.1)
     values = calc_trajs(now_trajs[:batch_size])
     plt.title(f"turn: %.2lf, deg %.2lf, dis %.2lf, stay %.2lf" % (values[0], values[1], values[2], values[3]))
     plt.tight_layout()

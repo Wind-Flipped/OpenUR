@@ -89,7 +89,7 @@ def train(train_files, config, accelerator, model, optimizer, lr_scheduler, devi
         if config.text_condition == 0:
             clean_text = None
         else:
-            clean_text = list(batch[1])
+            clean_text = batch[1].float().to(device)
         clean_traj = batch[2].int().to(device)
 
         with accelerator.accumulate(model):
@@ -123,7 +123,7 @@ def test(test_files, config, accelerator, model, epoch):
             if config.text_condition == 0:
                 clean_text = None
             else:
-                clean_text = list(batch[1])
+                clean_text = batch[1].float().cuda()
 
             real_trajs = batch[2].cpu().numpy()
 
@@ -180,7 +180,7 @@ if __name__ == "__main__":
     parser.add_argument("--image_size", type=int, default=96)
     parser.add_argument("--train_batch_size", type=int, default=350)
     parser.add_argument("--eval_batch_size", type=int, default=1024)
-    parser.add_argument("--num_epochs", type=int, default=50000)
+    parser.add_argument("--num_epochs", type=int, default=1000)
     parser.add_argument("--gpu", type=str, default="cuda:2")
 
     parser.add_argument("--model", type=str, default="ur_base")
@@ -190,8 +190,8 @@ if __name__ == "__main__":
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--lr_warmup_steps", type=int, default=500)
-    parser.add_argument("--save_model_epochs", type=int, default=100)
-    parser.add_argument("--test_model_epochs", type=int, default=100)
+    parser.add_argument("--save_model_epochs", type=int, default=10)
+    parser.add_argument("--test_model_epochs", type=int, default=10)
     parser.add_argument("--mixed_precision", type=str, default='fp16')
 
     parser.add_argument("--seed", type=int, default=0)

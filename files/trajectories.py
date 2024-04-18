@@ -40,7 +40,7 @@ class Trajectories(Dataset):
         self.trajectories = self.init_npy(now_path, 0)
         self.uids = self.init_npy(now_path.replace("data.npy", "uid.npy"), 1)
         if self.text_condition == 1:
-            self.strs = self.init_npy(now_path.replace("data.npy", "str.npy"), 2)
+            self.strs = self.init_npy(now_path.replace("data.npy", "t5emb.npy"), 1)
 
         self.seq_len = seq_len
         self.size = len(self.trajectories)

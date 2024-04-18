@@ -423,8 +423,9 @@ class MaskedGenerativeEncoderViT(nn.Module):
         return loss, loss_smooth, loss_pre, loss_nll
 
     def text_encoder(self, text):
-        text_embeds = self.encode_text(text).float()
-        context = self.text_embed_proj(text_embeds)
+        # text_embeds = self.encode_text(text).float()
+        # context = self.text_embed_proj(text_embeds)
+        context = self.text_embed_proj(text)
         return context
 
     def forward(self, imgs, text=None):

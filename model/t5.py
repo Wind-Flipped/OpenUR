@@ -74,6 +74,7 @@ def t5_encode_text(
 
     t5, tokenizer = get_model_and_tokenizer(name)
 
+    # device = 'cuda:2'
     if torch.cuda.is_available():
         t5 = t5.cuda()
 
